@@ -4,7 +4,7 @@
 
 It's just an composite implementation of the Elmah.ErrorLog abstract class to add fallback feature to ELMAH.
 
-You can copy the source into your projects or install the [nuget package](http://nuget.org/packages/Elmah-FallbackErrorLog).
+You can copy the source into your projects or install the [nuget package](http://nuget.org/packages/Elmah.FallbackErrorLog/).
 
 
 ## Configuration sample

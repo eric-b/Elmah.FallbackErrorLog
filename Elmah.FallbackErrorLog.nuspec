@@ -5,7 +5,7 @@
     <version>$version$</version>
     <title>$title$</title>
     <authors>Eric Boumendil</authors>
-    <owners>$author$</owners>
+    <owners>Eric Boumendil</owners>
     <licenseUrl>http://www.apache.org/licenses/LICENSE-2.0</licenseUrl>
     <projectUrl>https://github.com/eric-b/Elmah.FallbackErrorLog</projectUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
