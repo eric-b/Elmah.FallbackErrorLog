@@ -1,6 +1,7 @@
 draft.md
 *.bat
 *.nupkg
+*.sln
 
 #################
 ## Eclipse

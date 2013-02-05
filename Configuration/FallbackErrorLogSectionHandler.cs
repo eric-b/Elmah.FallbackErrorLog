@@ -21,8 +21,8 @@ namespace Elmah
             var typeAttr = section.Attributes["type"];
             var typeSpec = typeAttr != null ? typeAttr.Value : null;
 
-            if (string.IsNullOrEmpty(typeSpec) 
-                || !typeSpec.StartsWith(typeof(FallbackErrorLog).FullName))
+            if (string.IsNullOrEmpty(typeSpec)
+                || !section.HasChildNodes)
             {
                 // for compatibility with Elmah.ErrorLogSectionHandler:
                 return new SingleTagSectionHandler().Create(parent, configContext, section);
