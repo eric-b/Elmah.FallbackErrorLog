@@ -50,3 +50,9 @@ You can copy the source into your projects or install the [nuget package](http:/
 
 ## Limitations, caveats, known bugs
 [Let me know](https://github.com/eric-b/Elmah.FallbackErrorLog/issues) if you have troubles with use of this library.
+
+
+## See also
+
+A very nice article about ELMAH : [ELMAH - Error Logging Modules And Handlers](http://dotnetslackers.com/articles/aspnet/ErrorLoggingModulesAndHandlers.aspx)
+
