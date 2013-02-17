@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 
@@ -61,10 +62,18 @@ namespace Elmah
             return null;
         }
 
+        struct TupleError
+        {
+            public long Ticks;
+            public byte ErrorLogIndex;
+            public int ItemIndex;
+        }
+
+        
         public override int GetErrors(int pageIndex, int pageSize, System.Collections.IList errorEntryList)
         {
             if (errorEntryList == null)
-                throw new ArgumentNullException("errorEntryList");
+                return 0;
             if (pageIndex < 0)
                 throw new ArgumentOutOfRangeException("pageIndex", pageIndex, null);
             if (pageSize < 0)
@@ -72,33 +81,180 @@ namespace Elmah
             if (errorEntryList.Count != 0)
                 throw new InvalidOperationException("errorEntryList must be empty.");
 
-            var initialCapacity = pageSize * _errorLogs.Count;
-            List<ErrorLogEntry> list = new List<ErrorLogEntry>(initialCapacity);
-            foreach (var log in _errorLogs.Values)
+            const int memoryLimit = 10490000; // 10 Mo ~ +800k elements...
+            const int tupleErrorObjectSize = 13; // bytes
+            List<ErrorLogEntry> list;
+            var totalCount = 0;
+            var sourceCount = 0;
+            if (pageIndex == 0)
             {
-                try
+                #region First page: simple GetErrors(pageIndex, pageSize, list)...
+                var initialCapacity = pageSize * _errorLogs.Count;
+                list = new List<ErrorLogEntry>(initialCapacity);
+                foreach (var log in _errorLogs.Values)
                 {
-                    List<ErrorLogEntry> innerList = new List<ErrorLogEntry>(pageSize);
-                    var count = log.GetErrors(pageIndex, pageSize, innerList);
-                    list.AddRange(innerList);
-                    if (list.Count >= initialCapacity)
-                        break;
+                    try
+                    {
+
+                        var count = log.GetErrors(pageIndex, pageSize, list);
+                        if (count != 0)
+                        {
+                            sourceCount++;
+                            totalCount += count;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine(string.Format("{0}: {1}", log.GetType().Name, ex));
+                    }
                 }
-                catch(Exception ex)
+                #endregion
+            }
+            else
+            {
+                List<ErrorLogEntry> fooList = new List<ErrorLogEntry>(_errorLogs.Count);
+                #region Récupère dans counts le nb total d'éléments par errorLog
+                int[] counts = new int[_errorLogs.Count];
+                for (byte i = 0; i < _errorLogs.Count; i++)
                 {
-                    System.Diagnostics.Debug.WriteLine(string.Format("{0}: {1}", log.GetType().Name, ex));
+                    try
+                    {
+                        counts[i] = _errorLogs.ElementAt(i).Value.GetErrors(0, 1, fooList);
+                        sourceCount++;
+                    }
+                    catch { }
                 }
+                #endregion
+
+                totalCount = counts.Sum();
+                var requiredByteSize = totalCount * tupleErrorObjectSize;
+                if (requiredByteSize > memoryLimit)
+                {
+                    // Protection...
+                    var errorMask = fooList[0];
+                    errorMask.Error.Message = string.Format("FallbackErrorLog: max items limit reached: {0} errors. Pagination disabled. Please do clean-up.", totalCount);
+                    errorMask.Error.StatusCode = -1;
+                    errorMask.Error.Time = DateTime.Now;
+                    errorMask.Error.Type = "FallbackErrorLog";
+                    errorEntryList.Add(fooList[0]);
+                    return 1;
+                }
+                List<TupleError> errors = new List<TupleError>(totalCount);
+                fooList.Clear();
+                fooList.Capacity = Math.Min((int)counts.Average(), 100);
+                for (byte i = 0; i < _errorLogs.Count; i++)
+                {
+                    var count = counts[i];
+                    if (count == 0)
+                        continue;
+                    var log = _errorLogs.ElementAt(i).Value;
+                    var blocSize = Math.Min(count, 100);
+                    var lastPage = (int)Math.Ceiling((double)count / blocSize);
+                    for (int j = 0; j < lastPage; j++)
+                    {
+                        log.GetErrors(j, blocSize, fooList);
+                        for (int k = 0; k < fooList.Count; k++)
+                        {
+                            var e = fooList[k];
+                            errors.Add(new TupleError()
+                            {
+                                ErrorLogIndex = i,
+                                ItemIndex = j * blocSize + k,
+                                Ticks = e.Error.Time.Ticks
+                            });
+                        }
+                        fooList.Clear();
+                    }
+                }
+
+                var errorSequences = errors
+                    .OrderByDescending(t => t.Ticks)
+                    .Skip(pageIndex * pageSize)
+                    .Take(pageSize)
+                    .OrderBy(t => t.ErrorLogIndex)
+                    .ThenBy(t => t.ItemIndex)
+                    .ToArray();
+
+                fooList.Capacity = errorSequences.Length;
+                fooList.Clear();
+                for (int i = 0; i < errorSequences.Length; i++)
+                {
+                    var e = errorSequences[i];
+                    var logIndex = e.ErrorLogIndex;
+                    var firstIndex = e.ItemIndex;
+                    var lastIndex = firstIndex;
+                    for (int j = i + 1; j < errorSequences.Length; j++)
+                    {
+                        var e2 = errorSequences[j];
+                        if (e.ErrorLogIndex != e2.ErrorLogIndex)
+                            break;
+                        if (e2.ItemIndex == lastIndex + 1)
+                            lastIndex = e2.ItemIndex;
+                        else
+                            break;
+                    }
+
+                    var sequenceSize = lastIndex - firstIndex + 1;
+                    var sequenceIndex = firstIndex / sequenceSize;
+                    var initialCount = fooList.Count;
+                    var log = _errorLogs.ElementAt(logIndex).Value;
+                    log.GetErrors(sequenceIndex, sequenceSize, fooList);
+                    int missingElements = 0;
+                    for (int j = initialCount; j < fooList.Count; j++)
+                    {
+                        if (fooList[j].Error.Time.Ticks != errorSequences[i].Ticks)
+                        {
+                            // sequence splitted into 2 pages...
+                            fooList[j] = null;
+                            missingElements++;
+                        }
+                        else
+                            break;
+                    }
+                    if (missingElements != 0)
+                    {
+                        initialCount = fooList.Count;
+                        log.GetErrors(sequenceIndex + 1, sequenceSize, fooList);
+                        for (int j = initialCount + missingElements; j < fooList.Count; j++)
+                        {
+                            fooList[j] = null;
+                        }
+                    }
+                    i += sequenceSize - 1;
+                }
+
+                list = fooList.Where(t => t != null).ToList();
             }
 
-            foreach (var element in list.OrderByDescending(t => t.Error.Time).Take(pageSize))
-                errorEntryList.Add(element);
+            if (sourceCount > 1)
+            {
+                foreach (var element in list.OrderByDescending(t => t.Error.Time).Take(pageSize))
+                    errorEntryList.Add(element);
+            }
+            else
+            {
+                foreach (var element in list)
+                    errorEntryList.Add(element);
+            }
 
-            return errorEntryList.Count;
+            return totalCount;
         }
 
         public override string Log(Error error)
         {
             var lastIndex = _errorLogs.Count - 1;
+#if DEBUG 
+            var testLogEx = error.Exception as TestLogException;
+            if (testLogEx != null)
+            {
+                // Only for test purpose...
+                if (testLogEx.Index < 0 || testLogEx.Index > lastIndex)
+                    return Log(new Error(new ArgumentOutOfRangeException("Index", string.Format("TestLogException.Index={1} out of range: 0-{0}.", lastIndex, testLogEx.Index))));
+
+                return _errorLogs.ElementAt(testLogEx.Index).Value.Log(error);
+            }
+#endif
+
             for (int i = 0; i < _errorLogs.Count; i++)
             {
                 var kvp = _errorLogs.ElementAt(i);

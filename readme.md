@@ -49,6 +49,9 @@ You can copy the source into your projects or install the [nuget package](http:/
 	</configuration>
 
 ## Limitations, caveats, known bugs
+
+* Limit on the number of items that can be paginated (approx. 800k !) on the error log display page.
+
 [Let me know](https://github.com/eric-b/Elmah.FallbackErrorLog/issues) if you have troubles with use of this library.
 
 
