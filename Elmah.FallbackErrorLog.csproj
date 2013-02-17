@@ -48,6 +48,7 @@
     <Compile Include="Configuration\FallbackErrorLogSectionHandler.cs" />
     <Compile Include="FallbackErrorLog.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="TestLogException.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Elmah.FallbackErrorLog.nuspec">
